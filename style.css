@@ -157,6 +157,21 @@ input[type="range"]:last-child {
   margin-bottom: 0;
 }
 
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 15px;
+  color: #35415f;
+}
+
+.switch-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--primary);
+}
+
 .btn {
   border: 0;
   border-radius: 12px;

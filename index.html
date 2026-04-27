@@ -36,6 +36,19 @@
       </section>
 
       <section class="actions">
+        <div class="control-group card">
+          <label class="range-label" for="skinProtectRange">
+            <span>人像肤色保护</span>
+            <strong id="skinProtectValue">70</strong>
+          </label>
+          <input id="skinProtectRange" type="range" min="0" max="100" value="70" />
+
+          <label class="range-label" for="faceLightRange">
+            <span>人脸补光</span>
+            <strong id="faceLightValue">60</strong>
+          </label>
+          <input id="faceLightRange" type="range" min="0" max="100" value="60" />
+        </div>
         <button id="startBtn" class="btn primary">开始调色</button>
         <p id="statusText" class="status" aria-live="polite"></p>
       </section>

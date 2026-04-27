@@ -8,6 +8,10 @@ const resultHint = document.getElementById("resultHint");
 const resultCanvas = document.getElementById("resultCanvas");
 const resultImage = document.getElementById("resultImage");
 const saveTip = document.getElementById("saveTip");
+const skinProtectRange = document.getElementById("skinProtectRange");
+const faceLightRange = document.getElementById("faceLightRange");
+const skinProtectValue = document.getElementById("skinProtectValue");
+const faceLightValue = document.getElementById("faceLightValue");
 const statusText = document.getElementById("statusText");
 const startBtn = document.getElementById("startBtn");
 const downloadBtn = document.getElementById("downloadBtn");
@@ -17,6 +21,8 @@ let referenceImage = null;
 let hasResult = false;
 let resultBlob = null;
 let resultObjectUrl = "";
+
+bindRangeLabels();
 
 sourceInput.addEventListener("change", async (event) => {
   const file = event.target.files && event.target.files[0];
@@ -58,7 +64,10 @@ startBtn.addEventListener("click", async () => {
   await waitForPaint();
 
   try {
-    applyColorStyle(sourceImage, referenceImage, resultCanvas);
+    applyColorStyle(sourceImage, referenceImage, resultCanvas, {
+      skinProtect: Number(skinProtectRange.value) / 100,
+      faceLight: Number(faceLightRange.value) / 100,
+    });
     resultBlob = await canvasToPngBlob(resultCanvas);
     updateResultImageFromBlob(resultBlob);
     resultCanvas.style.display = "block";
@@ -146,6 +155,16 @@ function waitForPaint() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+function bindRangeLabels() {
+  const sync = () => {
+    skinProtectValue.textContent = skinProtectRange.value;
+    faceLightValue.textContent = faceLightRange.value;
+  };
+  skinProtectRange.addEventListener("input", sync);
+  faceLightRange.addEventListener("input", sync);
+  sync();
+}
+
 function canvasToPngBlob(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -211,7 +230,7 @@ function downloadByAnchor(blob) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-function applyColorStyle(sourceImg, referenceImg, outputCanvas) {
+function applyColorStyle(sourceImg, referenceImg, outputCanvas, userOptions) {
   const maxEdge = 1600;
   const sourceSize = fitSize(sourceImg.width, sourceImg.height, maxEdge);
   outputCanvas.width = sourceSize.width;
@@ -231,6 +250,10 @@ function applyColorStyle(sourceImg, referenceImg, outputCanvas) {
 
   const sourceStats = getImageStats(sourceImageData.data);
   const refStats = getImageStats(refImageData.data);
+  const options = {
+    skinProtect: clamp(userOptions.skinProtect, 0, 1),
+    faceLight: clamp(userOptions.faceLight, 0, 1),
+  };
 
   const brightnessDelta = clamp(refStats.luminanceMean - sourceStats.luminanceMean, -28, 28);
   const contrastScale = clamp(
@@ -251,9 +274,12 @@ function applyColorStyle(sourceImg, referenceImg, outputCanvas) {
 
   const pixels = sourceImageData.data;
   for (let i = 0; i < pixels.length; i += 4) {
-    let r = pixels[i];
-    let g = pixels[i + 1];
-    let b = pixels[i + 2];
+    const r0 = pixels[i];
+    const g0 = pixels[i + 1];
+    const b0 = pixels[i + 2];
+    let r = r0;
+    let g = g0;
+    let b = b0;
     const a = pixels[i + 3];
 
     if (a === 0) continue;
@@ -270,14 +296,141 @@ function applyColorStyle(sourceImg, referenceImg, outputCanvas) {
     hsl.s = clamp(hsl.s * saturationScale, 0, 1);
     hsl.l = clamp(hsl.l, 0.03, 0.97);
 
-    const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+    let styled = hslToRgb(hsl.h, hsl.s, hsl.l);
+    const skinConfidence = getSkinConfidence(r0, g0, b0);
 
-    pixels[i] = clamp(rgb.r, 0, 255);
-    pixels[i + 1] = clamp(rgb.g, 0, 255);
-    pixels[i + 2] = clamp(rgb.b, 0, 255);
+    if (skinConfidence > 0) {
+      styled = tuneSkinPixel(r0, g0, b0, styled, skinConfidence, options);
+    } else {
+      styled = blendRgb(
+        { r: r0, g: g0, b: b0 },
+        styled,
+        clamp(0.82 + options.skinProtect * 0.18, 0.8, 1)
+      );
+    }
+
+    pixels[i] = clamp(styled.r, 0, 255);
+    pixels[i + 1] = clamp(styled.g, 0, 255);
+    pixels[i + 2] = clamp(styled.b, 0, 255);
   }
 
   outputCtx.putImageData(sourceImageData, 0, 0);
+}
+
+function getSkinConfidence(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const rgbRule =
+    r > 95 &&
+    g > 40 &&
+    b > 20 &&
+    r > g &&
+    r > b &&
+    max - min > 15;
+
+  const y = 0.299 * r + 0.587 * g + 0.114 * b;
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  const ycbcrRule = cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173 && y > 45 && y < 245;
+
+  const hsl = rgbToHsl(r, g, b);
+  const hueRule = hsl.h <= 50 || hsl.h >= 330;
+  const satRule = hsl.s >= 0.08 && hsl.s <= 0.68;
+  const lumRule = hsl.l >= 0.12 && hsl.l <= 0.88;
+
+  if (!rgbRule || !ycbcrRule || !hueRule || !satRule || !lumRule) {
+    return 0;
+  }
+
+  let confidence = 0.56;
+  if (hsl.h <= 35 || hsl.h >= 340) confidence += 0.16;
+  if (cr > 138 && cr < 166) confidence += 0.14;
+  if (cb > 84 && cb < 122) confidence += 0.12;
+  if (r - g < 70 && g - b < 70) confidence += 0.08;
+
+  return clamp(confidence, 0, 1);
+}
+
+function tuneSkinPixel(r0, g0, b0, styled, skinConfidence, options) {
+  const orig = { r: r0, g: g0, b: b0 };
+  const protectStrength = clamp(0.35 + options.skinProtect * 0.2, 0.35, 0.55);
+  const nonSkinStrength = clamp(0.8 + options.skinProtect * 0.2, 0.8, 1);
+  const styleStrength = clamp(
+    nonSkinStrength - skinConfidence * (nonSkinStrength - protectStrength),
+    0.35,
+    0.95
+  );
+
+  let mixed = blendRgb(orig, styled, styleStrength);
+  const lightInfo = getLuminanceAndShadow(mixed.r, mixed.g, mixed.b);
+  const faceLightBase = 0.08 + options.faceLight * 0.1;
+  const protectBoost = 0.05 + options.skinProtect * 0.07;
+  const darkBoost = (1 - lightInfo.lNorm) * 0.14;
+  const shadowBoost = lightInfo.shadowFactor * 0.12;
+  const highlightProtect = 1 - lightInfo.highlightFactor * 0.82;
+  let lightGain =
+    (faceLightBase + protectBoost + darkBoost + shadowBoost) * skinConfidence * highlightProtect;
+
+  if (lightInfo.lNorm > 0.82) {
+    lightGain *= 0.25;
+  } else if (lightInfo.lNorm > 0.72) {
+    lightGain *= 0.5;
+  }
+  lightGain = clamp(lightGain, 0, 0.22);
+
+  let hsl = rgbToHsl(mixed.r, mixed.g, mixed.b);
+  hsl.l = clamp(hsl.l + lightGain, 0.02, 0.96);
+  hsl.s = clamp(hsl.s * (0.98 - skinConfidence * 0.08), 0.06, 0.62);
+  mixed = hslToRgb(hsl.h, hsl.s, hsl.l);
+
+  const neutralLift = (0.012 + 0.03 * options.skinProtect) * skinConfidence;
+  mixed.r += 255 * neutralLift * 0.9;
+  mixed.g += 255 * neutralLift * 0.75;
+  mixed.b += 255 * neutralLift * 1.08;
+
+  const warmBoost = (0.01 + 0.03 * options.faceLight) * skinConfidence;
+  mixed.r += 255 * warmBoost * 0.42;
+  mixed.g += 255 * warmBoost * 0.14;
+  mixed.b -= 255 * warmBoost * 0.22;
+
+  mixed.g -= 255 * 0.01 * skinConfidence;
+  mixed.b -= 255 * 0.008 * skinConfidence;
+
+  mixed.r = clamp(mixed.r, 0, 255);
+  mixed.g = clamp(mixed.g, 0, 255);
+  mixed.b = clamp(mixed.b, 0, 255);
+
+  const overflow = Math.max(mixed.r, mixed.g, mixed.b) - 252;
+  if (overflow > 0) {
+    mixed.r -= overflow * 0.65;
+    mixed.g -= overflow * 0.75;
+    mixed.b -= overflow * 0.9;
+  }
+
+  return {
+    r: Math.round(clamp(mixed.r, 0, 255)),
+    g: Math.round(clamp(mixed.g, 0, 255)),
+    b: Math.round(clamp(mixed.b, 0, 255)),
+  };
+}
+
+function blendRgb(base, target, strength) {
+  const t = clamp(strength, 0, 1);
+  return {
+    r: base.r + (target.r - base.r) * t,
+    g: base.g + (target.g - base.g) * t,
+    b: base.b + (target.b - base.b) * t,
+  };
+}
+
+function getLuminanceAndShadow(r, g, b) {
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const lNorm = lum / 255;
+  return {
+    lNorm,
+    shadowFactor: clamp((0.5 - lNorm) / 0.5, 0, 1),
+    highlightFactor: clamp((lNorm - 0.62) / 0.38, 0, 1),
+  };
 }
 
 function getImageStats(pixels) {

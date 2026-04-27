@@ -6,6 +6,8 @@ const sourceHint = document.getElementById("sourceHint");
 const referenceHint = document.getElementById("referenceHint");
 const resultHint = document.getElementById("resultHint");
 const resultCanvas = document.getElementById("resultCanvas");
+const resultImage = document.getElementById("resultImage");
+const saveTip = document.getElementById("saveTip");
 const statusText = document.getElementById("statusText");
 const startBtn = document.getElementById("startBtn");
 const downloadBtn = document.getElementById("downloadBtn");
@@ -13,6 +15,8 @@ const downloadBtn = document.getElementById("downloadBtn");
 let sourceImage = null;
 let referenceImage = null;
 let hasResult = false;
+let resultBlob = null;
+let resultObjectUrl = "";
 
 sourceInput.addEventListener("change", async (event) => {
   const file = event.target.files && event.target.files[0];
@@ -55,8 +59,13 @@ startBtn.addEventListener("click", async () => {
 
   try {
     applyColorStyle(sourceImage, referenceImage, resultCanvas);
+    resultBlob = await canvasToPngBlob(resultCanvas);
+    updateResultImageFromBlob(resultBlob);
     resultCanvas.style.display = "block";
+    resultImage.style.display = "none";
     resultHint.style.display = "none";
+    saveTip.style.display = "none";
+    saveTip.textContent = "";
     hasResult = true;
     downloadBtn.disabled = false;
     setStatus("调色完成");
@@ -67,12 +76,23 @@ startBtn.addEventListener("click", async () => {
   }
 });
 
-downloadBtn.addEventListener("click", () => {
+downloadBtn.addEventListener("click", async () => {
   if (!hasResult) return;
-  const link = document.createElement("a");
-  link.download = `styled-${Date.now()}.png`;
-  link.href = resultCanvas.toDataURL("image/png");
-  link.click();
+  try {
+    const blob = resultBlob || (await canvasToPngBlob(resultCanvas));
+    resultBlob = blob;
+
+    const shared = await tryShareImage(blob);
+    if (shared) {
+      setStatus("已打开分享面板，可保存到相册");
+      return;
+    }
+
+    showLongPressSaveGuide(blob);
+    downloadByAnchor(blob);
+  } catch (error) {
+    setStatus("下载失败，请重试");
+  }
 });
 
 function setStatus(text) {
@@ -89,9 +109,17 @@ function clearResult() {
   const ctx = resultCanvas.getContext("2d");
   ctx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
   resultCanvas.style.display = "none";
+  resultImage.style.display = "none";
   resultHint.style.display = "block";
+  saveTip.style.display = "none";
+  saveTip.textContent = "";
   downloadBtn.disabled = true;
   hasResult = false;
+  resultBlob = null;
+  if (resultObjectUrl) {
+    URL.revokeObjectURL(resultObjectUrl);
+    resultObjectUrl = "";
+  }
 }
 
 function showPreview(image, imgEl, hintEl) {
@@ -116,6 +144,71 @@ function fileToImage(file) {
 
 function waitForPaint() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("png blob create failed"));
+        return;
+      }
+      resolve(blob);
+    }, "image/png");
+  });
+}
+
+async function tryShareImage(blob) {
+  if (!navigator.share || typeof navigator.canShare !== "function") {
+    return false;
+  }
+
+  const file = new File([blob], "color-result.png", { type: "image/png" });
+  const shareData = {
+    files: [file],
+    title: "调色结果",
+    text: "AI 图片风格调色工具结果图",
+  };
+
+  if (!navigator.canShare(shareData)) {
+    return false;
+  }
+
+  try {
+    await navigator.share(shareData);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function updateResultImageFromBlob(blob) {
+  if (resultObjectUrl) {
+    URL.revokeObjectURL(resultObjectUrl);
+  }
+  resultObjectUrl = URL.createObjectURL(blob);
+  resultImage.src = resultObjectUrl;
+}
+
+function showLongPressSaveGuide(blob) {
+  if (!resultObjectUrl) {
+    updateResultImageFromBlob(blob);
+  }
+  resultCanvas.style.display = "none";
+  resultImage.style.display = "block";
+  resultHint.style.display = "none";
+  saveTip.textContent = "请长按图片，选择保存到相册。";
+  saveTip.style.display = "block";
+  setStatus("当前浏览器无法直接分享文件，已切换为长按保存模式");
+}
+
+function downloadByAnchor(blob) {
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.download = "color-result.png";
+  link.href = url;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function applyColorStyle(sourceImg, referenceImg, outputCanvas) {

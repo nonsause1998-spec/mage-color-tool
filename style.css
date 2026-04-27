@@ -167,6 +167,11 @@ input[type="file"] {
   background: #f3f7ff;
 }
 
+.save-tip {
+  margin: 10px 0 0;
+  display: none;
+}
+
 @media (min-width: 720px) {
   .upload-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>AI 图片风格调色工具</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>AI 图片风格调色工具</h1>
+        <p>上传原图和参考风格图，一键自动调色</p>
+      </header>
+
+      <section class="upload-grid">
+        <article class="card">
+          <h2>上传原图</h2>
+          <label class="file-label" for="sourceInput">选择原图</label>
+          <input id="sourceInput" type="file" accept="image/*" />
+          <div class="preview-wrap">
+            <img id="sourcePreview" alt="原图预览" />
+            <p id="sourceHint" class="hint">尚未选择原图</p>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>上传参考风格图</h2>
+          <label class="file-label" for="referenceInput">选择参考图</label>
+          <input id="referenceInput" type="file" accept="image/*" />
+          <div class="preview-wrap">
+            <img id="referencePreview" alt="参考图预览" />
+            <p id="referenceHint" class="hint">尚未选择参考图</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="actions">
+        <button id="startBtn" class="btn primary">开始调色</button>
+        <p id="statusText" class="status" aria-live="polite"></p>
+      </section>
+
+      <section class="result card">
+        <h2>调色结果</h2>
+        <div class="preview-wrap result-wrap">
+          <canvas id="resultCanvas"></canvas>
+          <p id="resultHint" class="hint">调色完成后会在这里显示结果图</p>
+        </div>
+        <button id="downloadBtn" class="btn" disabled>下载结果</button>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
